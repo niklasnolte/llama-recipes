@@ -7,6 +7,9 @@ import fire
 import os
 import sys
 import time
+import pandas as pd
+import tqdm
+import json
 
 import torch
 from transformers import LlamaTokenizer
@@ -29,7 +32,7 @@ def main(
     temperature: float=1.0, # [optional] The value used to modulate the next token probabilities.
     top_k: int=50, # [optional] The number of highest probability vocabulary tokens to keep for top-k-filtering.
     repetition_penalty: float=1.0, #The parameter for repetition penalty. 1.0 means no penalty.
-    length_penalty: int=1, #[optional] Exponential penalty to the length that is used with beam-based generation. 
+    length_penalty: int=1, #[optional] Exponential penalty to the length that is used with beam-based generation.
     enable_azure_content_safety: bool=False, # Enable safety check with Azure content safety api
     enable_sensitive_topics: bool=False, # Enable check for sensitive topics using AuditNLG APIs
     enable_salesforce_content_safety: bool=True, # Enable safety check with Salesforce safety flan t5
@@ -37,104 +40,74 @@ def main(
     use_fast_kernels: bool = False, # Enable using SDPA from PyTroch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
     **kwargs
 ):
-    if prompt_file is not None:
-        assert os.path.exists(
-            prompt_file
-        ), f"Provided Prompt file does not exist {prompt_file}"
-        with open(prompt_file, "r") as f:
-            user_prompt = "\n".join(f.readlines())
-    elif not sys.stdin.isatty():
-        user_prompt = "\n".join(sys.stdin.readlines())
-    else:
-        print("No user prompt provided. Exiting.")
-        sys.exit(1)
-    
+    if prompt_file is None:
+        raise NotImplementedError("Please provide a prompt file")
+
+    assert os.path.exists(
+        prompt_file
+    ), f"Provided Prompt file does not exist {prompt_file}"
+    user_prompts = pd.read_json(prompt_file, lines=True).values.flatten().tolist()
+
     # Set the seeds for reproducibility
     torch.cuda.manual_seed(seed)
     torch.manual_seed(seed)
-    
+
     model = load_model(model_name, quantization)
     if peft_model:
         model = load_peft_model(model, peft_model)
 
     model.eval()
-    
+
     if use_fast_kernels:
         """
         Setting 'use_fast_kernels' will enable
-        using of Flash Attention or Xformer memory-efficient kernels 
+        using of Flash Attention or Xformer memory-efficient kernels
         based on the hardware being used. This would speed up inference when used for batched inputs.
         """
         try:
             from optimum.bettertransformer import BetterTransformer
-            model = BetterTransformer.transform(model)    
+            model = BetterTransformer.transform(model)
         except ImportError:
             print("Module 'optimum' not found. Please install 'optimum' it before proceeding.")
 
     tokenizer = LlamaTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens(
         {
-         
+
             "pad_token": "<PAD>",
         }
     )
-    model.resize_token_embeddings(model.config.vocab_size + 1) 
-    
-    safety_checker = get_safety_checker(enable_azure_content_safety,
-                                        enable_sensitive_topics,
-                                        enable_salesforce_content_safety,
-                                        )
+    model.resize_token_embeddings(model.config.vocab_size + 1)
 
-    # Safety check of the user prompt
-    safety_results = [check(user_prompt) for check in safety_checker]
-    are_safe = all([r[1] for r in safety_results])
-    if are_safe:
-        print("User prompt deemed safe.")
-        print(f"User prompt:\n{user_prompt}")
-    else:
-        print("User prompt deemed unsafe.")
-        for method, is_safe, report in safety_results:
-            if not is_safe:
-                print(method)
-                print(report)
-        print("Skipping the inference as the prompt is not safe.")
-        sys.exit(1)  # Exit the program with an error status
-        
-    batch = tokenizer(user_prompt, padding='max_length', truncation=True, max_length=max_padding_length, return_tensors="pt")
+    for element in tqdm.tqdm(user_prompts):
+        element = list(json.loads(element).items())
+        # rotate the prompt one by one and predict the last element
+        for rotation in range(len(element)):
+            prompt = element[rotation:] + element[:rotation]
+            prompt[-1] = (prompt[-1][0], "") # remove last element
+            prompt = json.dumps(dict(prompt))[:-4] # remove the space, 2 quotes and the final curly brace ` ""}`
+            batch = tokenizer(prompt, padding=False, return_tensors="pt")
 
-    batch = {k: v.to("cuda") for k, v in batch.items()}
-    start = time.perf_counter()
-    with torch.no_grad():
-        outputs = model.generate(
-            **batch,
-            max_new_tokens=max_new_tokens,
-            do_sample=do_sample,
-            top_p=top_p,
-            temperature=temperature,
-            min_length=min_length,
-            use_cache=use_cache,
-            top_k=top_k,
-            repetition_penalty=repetition_penalty,
-            length_penalty=length_penalty,
-            **kwargs 
-        )
-    e2e_inference_time = (time.perf_counter()-start)*1000
-    print(f"the inference time is {e2e_inference_time} ms")
-    output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    
-    # Safety check of the model output
-    safety_results = [check(output_text) for check in safety_checker]
-    are_safe = all([r[1] for r in safety_results])
-    if are_safe:
-        print("User input and model output deemed safe.")
-        print(f"Model output:\n{output_text}")
-    else:
-        print("Model output deemed unsafe.")
-        for method, is_safe, report in safety_results:
-            if not is_safe:
-                print(method)
-                print(report)
-                
+            batch = {k: v.to("cuda") for k, v in batch.items()}
+            with torch.no_grad():
+                outputs = model.generate(
+                    **batch,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=do_sample,
+                    top_p=top_p,
+                    temperature=temperature,
+                    min_length=min_length,
+                    use_cache=use_cache,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                    length_penalty=length_penalty,
+                    **kwargs
+                )
+            output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # lets put that into a file
+            with open("llama_outputs.txt", "a") as f:
+                f.write(f"{prompt} <|> {output_text}\n")
+
 
 if __name__ == "__main__":
     fire.Fire(main)

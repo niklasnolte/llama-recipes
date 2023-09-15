@@ -12,10 +12,10 @@ class train_config:
     run_validation: bool=True
     batch_size_training: int=4
     gradient_accumulation_steps: int=1
-    num_epochs: int=3
+    num_epochs: int=10
     num_workers_dataloader: int=1
     lr: float=1e-4
-    weight_decay: float=0.0
+    weight_decay: float=0.0001
     gamma: float= 0.85
     seed: int=42
     use_fp16: bool=False
@@ -35,6 +35,6 @@ class train_config:
     save_optimizer: bool=False # will be used if using FSDP
     use_fast_kernels: bool = False # Enable using SDPA from PyTroch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
 
-    
-    
-    
+
+
+
