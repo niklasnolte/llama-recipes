@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import pandas as pd
+import copy
 import tqdm
 import json
 
@@ -84,29 +85,30 @@ def main(
         # rotate the prompt one by one and predict the last element
         for rotation in range(len(element)):
             prompt = element[rotation:] + element[:rotation]
+            truth = json.dumps(dict(copy.deepcopy(prompt)))
             prompt[-1] = (prompt[-1][0], "") # remove last element
             prompt = json.dumps(dict(prompt))[:-4] # remove the space, 2 quotes and the final curly brace ` ""}`
-            batch = tokenizer(prompt, padding=False, return_tensors="pt")
+            # batch = tokenizer(prompt, padding=False, return_tensors="pt")
 
-            batch = {k: v.to("cuda") for k, v in batch.items()}
-            with torch.no_grad():
-                outputs = model.generate(
-                    **batch,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=do_sample,
-                    top_p=top_p,
-                    temperature=temperature,
-                    min_length=min_length,
-                    use_cache=use_cache,
-                    top_k=top_k,
-                    repetition_penalty=repetition_penalty,
-                    length_penalty=length_penalty,
-                    **kwargs
-                )
-            output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # batch = {k: v.to("cuda") for k, v in batch.items()}
+            # with torch.no_grad():
+            #     outputs = model.generate(
+            #         **batch,
+            #         max_new_tokens=max_new_tokens,
+            #         do_sample=do_sample,
+            #         top_p=top_p,
+            #         temperature=temperature,
+            #         min_length=min_length,
+            #         use_cache=use_cache,
+            #         top_k=top_k,
+            #         repetition_penalty=repetition_penalty,
+            #         length_penalty=length_penalty,
+            #         **kwargs
+            #     )
+            # output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
             # lets put that into a file
-            with open("llama_outputs.txt", "a") as f:
-                f.write(f"{prompt} <|> {output_text}\n")
+            with open("llama_truths.txt", "a") as f:
+                f.write(f"{truth}\n")# <|> {output_text}\n")
 
 
 if __name__ == "__main__":

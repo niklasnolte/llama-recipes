@@ -38,7 +38,6 @@ class KBGenDataset(Dataset):
         self.max_words = max_words
         # tokenizer = Tokenizer(model_path=model_path + "./tokenizer.model")
         self.tokenizer = tokenizer
-        # self.tokenizer1 = tokenizer
 
     def __len__(self):
         return len(self.data)
@@ -47,7 +46,7 @@ class KBGenDataset(Dataset):
         assert isinstance(index, int)
         assert 0 <= index < len(self)
 
-        prompt = self.data[index].replace("NaN", self.tokenizer.unk_token)
+        prompt = self.data[index].replace("NaN", self.tokenizer.pad_token)
 
         output = self.tokenizer(prompt)
 
@@ -60,13 +59,13 @@ class KBGenDataset(Dataset):
 
 
         for _ in range(len(output["input_ids"]), self.max_words):
-            output["input_ids"].append(self.tokenizer.unk_token_id)
+            output["input_ids"].append(self.tokenizer.pad_token_id)
         output["input_ids"] = torch.tensor(output["input_ids"], dtype=torch.int64)
 
         # 0 for pad token, 1 otherwise
-        output["attention_mask"] = output["input_ids"] != self.tokenizer.unk_token_id
+        output["attention_mask"] = output["input_ids"] != self.tokenizer.pad_token_id
 
         output["labels"] = copy.deepcopy(output["input_ids"])
-        output["labels"][output["labels"] == self.tokenizer.unk_token_id] = -100
+        output["labels"][output["labels"] == self.tokenizer.pad_token_id] = -100
 
         return output

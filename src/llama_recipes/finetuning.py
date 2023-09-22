@@ -141,6 +141,7 @@ def main(**kwargs):
                 "pad_token": "<PAD>",
             }
         )
+    model.resize_token_embeddings(len(tokenizer))
     if train_config.use_peft:
         peft_config = generate_peft_config(train_config, kwargs)
         model = get_peft_model(model, peft_config)
