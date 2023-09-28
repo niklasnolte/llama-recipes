@@ -5,7 +5,7 @@ import math
 import os
 from collections import defaultdict
 # %%
-with open("llama_outputs_greedy.txt", "r") as f:
+with open("llama_outputs_zeroshot_greedy.txt", "r") as f:
     lines = f.readlines()
 with open("llama_truths.txt", "r") as f:
     truths = [json.loads(x) for x in f.readlines()]
@@ -14,6 +14,7 @@ categorical_fields = [
   "phone.oem",
   "phone.network_edge"
 ]
+
 text_fields = [
   "phone.model",
 ]
@@ -22,13 +23,26 @@ n_errors = 0
 samples = []
 valid_inputs = 0
 for idx, line in enumerate(lines):
-  truth = truths[idx]
+  # truth = truths[idx]
+  print(idx, line)
+  truth, output = line.split(" <|> ")
+  truth = json.loads(truth)
+  assert truth == truths[idx]
   field_of_interest = list(truth.keys())[-1]
   if isinstance(truth[field_of_interest], float) and math.isnan(truth[field_of_interest]):
     continue
+
+  # cut outputs after the last field is predicted and remove the last comma
+  # last key of truth:
+  last_key = list(truth.keys())[-1]
+  # find that key in outputs
+  last_key_idx = output.find(last_key)
+  # from the on, go until the next comma
+  last_comma_idx = output.find(",", last_key_idx)
+  output = output[:last_comma_idx] + "}"
+
   valid_inputs += 1
   try:
-    _, output = line.split("<|>")
     parsed_output = json.loads(output)
     assert list(truth.keys()) == list(parsed_output.keys())
     if field_of_interest in categorical_fields + text_fields:
